@@ -1,0 +1,18 @@
+{
+    "db": {
+        "host": "192.168.1.82",
+        "user": "sa",
+        "pwd": "Alpha2020",
+        "db": "Platinum.Oms"
+    },
+    "running_time": [
+        ["090100", "101500"],
+        ["103100", "113000"],
+        ["133100", "160000"],
+        ["210100", "230000"]
+    ],
+    "loop_interval": 60,
+    "unfilled_order_warning_gap": 120,
+    "repeated_order_checking_window": 60,
+    "max_repeated_order": 10
+}

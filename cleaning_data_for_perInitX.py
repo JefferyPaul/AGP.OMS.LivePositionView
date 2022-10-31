@@ -103,20 +103,20 @@ if __name__ == '__main__':
             continue
         _initx = d_trader_initX[_trader]
         for _ticker, _position in d_trader_ticker_volume_px[_trader].items():
-            l_trader_ticker_volume_p_initx.append([_trader, _ticker, str(_position / _initx)])
+            l_trader_ticker_volume_p_initx.append([_ticker, _trader, str(_position / _initx)])
     if _error:
         raise Exception
 
     # trader name 处理
     for _ in l_trader_ticker_volume_p_initx:
-        _[0] = handle_trader_name(_[0])
+        _[1] = handle_trader_name(_[1])
 
     # 白名单
     if os.path.isfile(PATH_WHILT_LIST_File):
         with open(PATH_WHILT_LIST_File) as f:
             l_lines = f.readlines()
         l_white_list = [_.strip() for _ in l_lines if _.strip()]
-        l_trader_ticker_volume_p_initx = [_ for _ in l_trader_ticker_volume_p_initx if _[0] in l_white_list]
+        l_trader_ticker_volume_p_initx = [_ for _ in l_trader_ticker_volume_p_initx if _[1] in l_white_list]
 
     # 输出
     with open(PATH_OUTPUT_FILE, 'w') as f:

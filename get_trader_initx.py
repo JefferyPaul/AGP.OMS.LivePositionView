@@ -5,6 +5,7 @@ import sys
 from typing import Dict, List
 from collections import defaultdict
 from datetime import datetime, timedelta
+from time import sleep
 from sqlalchemy import create_engine, desc
 from sqlalchemy.orm import sessionmaker
 from urllib import parse
@@ -22,6 +23,7 @@ INFO_FILE = args.info_file
 OUTPUT_ROOT = args.output
 if os.path.isdir(OUTPUT_ROOT):
     shutil.rmtree(OUTPUT_ROOT)
+    sleep(1)
 os.makedirs(OUTPUT_ROOT)
 
 
@@ -58,7 +60,7 @@ if __name__ == '__main__':
     session = DBSession()
 
     # 获取db 数据
-    querying_dt = datetime.now() - timedelta(days=2)
+    querying_dt = datetime.now() - timedelta(days=3)
     l_pnls: List[PnL] = session.query(PnL).filter(PnL.DataTime > querying_dt).all()
     session.close()
     # 筛选

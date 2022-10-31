@@ -15,27 +15,41 @@ class ScheduleRunner:
     """
     def __init__(
             self,
-             running_time=[[datetime.time(0, 0, 0), datetime.time(23, 59, 59)], ],
-             loop_interval=60 * 1,
-             logger=logging.Logger('ScheduleRunner')
+            running_time=[[datetime.time(0, 0, 0), datetime.time(23, 59, 59)], ],
+            schedule_checking_interval=60 * 1,
+            logger=logging.Logger('ScheduleRunner')
          ):
         self._schedule_running_time = running_time
-        self._schedule_loop_interval = loop_interval
+        self._schedule_checking_interval = schedule_checking_interval
 
-        self._schedule_in_running = False
-        self._scheduler_thread = threading.Thread(target=self._scheduler_guard)
+        self.schedule_in_running = False
+        self._scheduler_guard_thread = threading.Thread(target=self._scheduler_guard)
         self.logger = logger
 
     @abc.abstractmethod
     def start(self):
-        self._scheduler_thread.start()
+        self._scheduler_guard_thread.start()
 
     @abc.abstractmethod
-    def _start_schedule(self):
+    def _start_task(self):
+        # 主要用于启动 _task_processing_loop
+        # self._task_processing_thread = threading.Thread(target=self._task_processing_loop)
+        # self._task_processing_thread.start()
         pass
 
     @abc.abstractmethod
-    def _end_schedule(self):
+    def _end_task(self):
+        # 主要用于结束 _task_processing_loop
+        # 阻塞,确保仅有一个 线程 在运行
+        # 用 _schedule_in_running 来判断 和 控制，不需要另外 结束
+        # self.logger.info('正在等待线程结束...')
+        # if self._task_processing_thread:
+        #     self._task_processing_thread.join()
+        # self.logger.info('线程已终止!')
+        pass
+
+    @abc.abstractmethod
+    def _task_processing_loop(self):
         pass
 
     def _scheduler_guard(self):
@@ -50,21 +64,21 @@ class ScheduleRunner:
             ]
 
             # 运行时间中
-            if self._schedule_in_running and is_in_running_time:
+            if self.schedule_in_running and is_in_running_time:
                 pass
             # 不在运行时间
-            elif (not self._schedule_in_running) and (not is_in_running_time):
+            elif (not self.schedule_in_running) and (not is_in_running_time):
                 pass
             # 开始
-            elif (not self._schedule_in_running) and is_in_running_time:
-                self._schedule_in_running = True
+            elif (not self.schedule_in_running) and is_in_running_time:
+                self.schedule_in_running = True
                 self.logger.info('开始运行...')
-                self._start_schedule()
+                self._start_task()
             # 结束运行
             else:
-                self._schedule_in_running = False
+                self.schedule_in_running = False
                 self.logger.info('暂停运行...')
-                self._end_schedule()
+                self._end_task()
 
             #
-            time.sleep(self._schedule_loop_interval)
+            time.sleep(self._schedule_checking_interval)

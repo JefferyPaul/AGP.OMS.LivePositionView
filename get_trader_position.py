@@ -4,6 +4,7 @@ import argparse
 import sys
 from typing import Dict, List
 from collections import defaultdict
+from time import sleep
 from datetime import datetime, timedelta
 
 PATH_ROOT = os.path.abspath(os.path.dirname(__file__))
@@ -19,6 +20,7 @@ INFO_FILE = args.info_file
 OUTPUT_ROOT = args.output
 if os.path.isdir(OUTPUT_ROOT):
     shutil.rmtree(OUTPUT_ROOT)
+    sleep(1)
 os.makedirs(OUTPUT_ROOT)
 
 

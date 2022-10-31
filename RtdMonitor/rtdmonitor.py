@@ -64,12 +64,12 @@ class RtdPlotterBase(ABC):
         self.engine = engine
 
     @abstractmethod
-    def plot(self):
+    def plot(self, *args):
         # 画图
         pass
 
     @abstractmethod
-    def update(self):
+    def update(self, *args):
         # 更新画图数据
         pass
 
@@ -79,7 +79,11 @@ class RtdDataHandlerBase(ABC):
         self.engine = engine
 
     @abstractmethod
-    def handling(self):
+    def handling(self, *args):
+        pass
+
+    @abstractmethod
+    def refresh_data(self, *args):
         pass
 
 
@@ -90,15 +94,17 @@ class RtdMonitorEngine(ScheduleRunner):
             self,
             running_time: list,  # ScheduleRunner
             rtd_task_interval: int,
-            data_handler: RtdDataHandlerBase,
-            plotter: RtdPlotterBase,
-            refresh_data_in_task_start: bool = True,     # 是否在（重新）启动任务时重新刷新 数据
+            # data_handler: RtdDataHandlerBase,
+            # plotter: RtdPlotterBase,
+            refresh_data_in_task_start: bool = False,     # 是否在（重新）启动任务时重新刷新 数据
             logger=MyLogger('RtdMonitor'),
     ):
         # 定时任务骑
-        super(RtdMonitorEngine, self).__init__(running_time=running_time, schedule_checking_interval=rtd_task_interval)
+        super(RtdMonitorEngine, self).__init__(
+            running_time=running_time, schedule_checking_interval=rtd_task_interval, logger=logger)
         self.task_interval = int(rtd_task_interval)
 
+        # 作为 data_handler / plotter
         """
         核心数据存储
         {
@@ -112,18 +118,21 @@ class RtdMonitorEngine(ScheduleRunner):
         }
         """
         self.data: Dict[str, List[RtdData]] = defaultdict(list)
-        self.data_update = True
+        self.is_data_updated = True
         # 数据处理
-        self.data_handler: RtdDataHandlerBase = data_handler
+        self.data_handler: RtdDataHandlerBase
         # 画图
-        self.plotter: RtdPlotterBase = plotter
-
-        #
-        self.logger: logging.Logger = logger
+        self.plotter: RtdPlotterBase
 
         #
         self._refresh_data_in_task_start = refresh_data_in_task_start
         self._task_processing_thread: None or threading.Thread = None
+
+    def add_data_handler(self, data_handler):
+        self.data_handler: RtdDataHandlerBase = data_handler
+
+    def add_plotter(self, plotter):
+        self.plotter: RtdPlotterBase = plotter
 
     def start(self):
         self._scheduler_guard_thread.start()
@@ -131,7 +140,7 @@ class RtdMonitorEngine(ScheduleRunner):
 
     def _start_task(self):
         if self._refresh_data_in_task_start:
-            self._refresh_data()
+            self.data_handler.refresh_data()
         self._task_processing_thread = threading.Thread(target=self._task_processing_loop)
         self._task_processing_thread.start()
 
@@ -151,30 +160,6 @@ class RtdMonitorEngine(ScheduleRunner):
             self.plotter.update()
             # 间隔
             sleep(self.task_interval)
-
-    def _refresh_data(self):
-        self.data = defaultdict(list)
-        self.data_update = True
-
-    # def _data_to_plot(self):
-    #     """
-    #     """
-    #     self._plotting_symbols = [_[0] for _ in sorted(
-    #         self._last_data.items(),
-    #         key=lambda x: x[1]['dt'],
-    #         reverse=True
-    #     )][:self._plot_count]
-    #     self._plotting_symbols.sort(key=lambda x: x.lower())
-    #
-    #     # 更新画图信息
-    #     self.logger.info('data to plotter')
-    #     for n, symbol in enumerate(self._plotting_symbols):
-    #         self.plotter.update_plot(
-    #             index=n,
-    #             x=[i['dt'] for i in self.data[symbol]],
-    #             y=[i['tp'] for i in self.data[symbol]],
-    #             symbol=symbol
-    #         )
 
 
 # ===========================
@@ -201,22 +186,37 @@ class RtdTimeSeriesDataHandler(RtdDataHandlerBase):
         column => ticker
         value => target_volume
 
-    读取最新日期中的文件；日期更新时 刷新数据
+    读取最新日期中的文件；
+    日期更新时 刷新数据
     每次读取所有未读取的数据文件；
 
     data 中
-    不保存所有数据，只保留发生变化时的数据
+    不保存所有数据，只保留value发生变化时的数据
+
 
 
     """
-    def __init__(self, engine: RtdMonitorEngine, path_root):
-        super(RtdTimeSeriesDataHandler).__init__(engine)
+    def __init__(
+            self,
+            engine: RtdMonitorEngine,
+            path_root,
+            all_in_one_ax_name="",
+            refresh_data_in_new_date=True,      # 新日期，重置数据
+            only_changed_data=True,     # 仅读取存储，value发生变化的数据，避免时间序列中有过多无用数据
+    ):
+        super(RtdTimeSeriesDataHandler, self).__init__(engine)
 
         self.path_root = path_root
+        self._refresh_data_in_new_date = refresh_data_in_new_date
+        self._only_changed_data = only_changed_data
+        self._all_in_one_ax_name = all_in_one_ax_name
+
+        # 初始化
         self._last_reading_file = ''
         self._last_reading_date = ''
 
     def handling(self):
+        self.engine.logger.info('handling new data')
         # [1] 查找最新的文件夹
         _is_new_date = False
         newest_date_folder_name = max([
@@ -228,8 +228,9 @@ class RtdTimeSeriesDataHandler(RtdDataHandlerBase):
         path_newest_date_folder = os.path.join(self.path_root, newest_date_folder_name)
 
         #
-        if _is_new_date:
-            pass
+        if self._refresh_data_in_new_date:
+            if _is_new_date:
+                self.refresh_data()
 
         # [2] 读取新的文件
         l_new_file_names = sorted([i for i in os.listdir(path_newest_date_folder) if i > os.path.basename(self._last_reading_file)])
@@ -245,32 +246,60 @@ class RtdTimeSeriesDataHandler(RtdDataHandlerBase):
 
     def _read_a_file(self, p):
         # [3] 读取新文件
-        _data_updated = False
+        self._set_data_unupdated()
         with open(p) as f:
             l_lines = f.readlines()
         for line in l_lines:
             line = line.strip()
             if line == '':
                 continue
-            dt, symbol, tp = line.split(',')
+            dt, column_name, value = line.split(',')
             dt = datetime.strptime(dt, '%Y%m%d %H%M%S')
-            tp = float(tp)
+            value = float(value)
             new_data = RtdData(
                 index=dt,
-                column=symbol,
-                value=tp,
+                column=column_name,
+                value=value,
             )
-            if not self.engine.data.get(symbol):
-                # 新增 symbol
-                self.engine.data[symbol].append(new_data)
-                _data_updated = True
-            elif tp != self.engine.data[symbol][-1]['value']:
-                # 信号改变, 添加
-                self.engine.data[symbol].append(new_data)
-                self._data_updated = True
+            # 只在 value 发生变化是添加新数据
+            if self._only_changed_data:
+                if not self._all_in_one_ax_name:
+                    _data_in_column = self.engine.data.get(column_name)
+                else:
+                    _data_in_column = [
+                        i for i in self.engine.data[self._all_in_one_ax_name]
+                        if i.column == column_name
+                    ]
+                if not _data_in_column:
+                    # 新增 symbol
+                    self._append_new_data(new_data)
+                    self._set_data_updated()
+                elif value != max(_data_in_column, key=lambda x: x.index).value:
+                    # 信号改变, 添加
+                    self._append_new_data(new_data)
+                    self._set_data_updated()
+            else:
+                self._append_new_data(new_data)
+                self._set_data_updated()
+
+    def _append_new_data(self, data: RtdData):
+        if not self._all_in_one_ax_name:
+            self.engine.data[data.column].append(data)
+        else:
+            self.engine.data[self._all_in_one_ax_name].append(data)
+
+    def _set_data_updated(self):
+        self.engine.is_data_updated = True
+
+    def _set_data_unupdated(self):
+        self.engine.is_data_updated = False
+
+    def refresh_data(self):
+        self.engine.data = defaultdict(list)
+        self.engine.is_data_updated = True
 
 
-class RtdPlotter(RtdPlotterBase):
+class RtdTimeSeriesPlotter(RtdPlotterBase):
     """
     1，持续接收画图信息，
     2，实现画图功能，
@@ -278,10 +307,14 @@ class RtdPlotter(RtdPlotterBase):
     1，持续接收画图信息，并在信息变更后立即重新再画。   plt.draw()
     """
     def __init__(
-            self, engine,
-            nrows, ncols, title
+            self,
+            engine,
+            nrows, ncols, title,
+            add_now_dt_tick=True,
     ):
-        super(RtdPlotterBase).__init__(engine=engine)
+        super(RtdTimeSeriesPlotter, self).__init__(engine=engine)
+        self._add_now_dt_tick = add_now_dt_tick
+
         self._plotting_thread: None or threading.Thread = None
 
         # 创建子图
@@ -315,55 +348,211 @@ class RtdPlotter(RtdPlotterBase):
         col_size = 2 * ncols
         return row_size, col_size
 
-    def show(self):
+    def plot(self):
         """ 显示曲线  外部调用"""
         plt.show()
 
-    def update_plot(self, index, x, y, symbol):
-        """
-        更新指定序号的子图
-        :param index: 子图序号
-        :param x: 横轴数据
-        :param y: 纵轴数据
-        :return:
-        """
-        # X轴数据必须和Y轴数据长度一致
+    def update(self):
+        self.engine.logger.info('plotting new data')
+        l_ax_names = list(self.engine.data.keys())
+        l_ax_names.sort()
+        for n, ax_name in enumerate(l_ax_names):
+            ax_data: List[RtdData] = self.engine.data[ax_name]
+            ax_data_column_name = list(set([i.column for i in ax_data]))
+            #
+            self._ax_list[n].clear()  # 清空子图数据
+            self._ax_list[n].set_title(ax_name, fontsize=8)
 
-        def _cal_y_ticks(_max, n) -> list:
-            if _max == 0:
-                return [-1, 0, 1]
-            if _max > 1:
-                num_n = len(str(_max).split('.')[0])
-                num_n -= 2
-            else:
-                num_n = -1
-                for s in str(_max).split('.')[-1]:
-                    if s != 0:
-                        break
-                    num_n -= 1
+            # 添加曲线
+            for column_name in ax_data_column_name:
+                ax_data_of_column = [i for i in ax_data if i.column == column_name]
+                ax_data_of_column.sort(key=lambda x: x.index)
+                x = [i.index for i in ax_data_of_column]
+                y = [i.value for i in ax_data_of_column]
+                if self._add_now_dt_tick:
+                    x.append(datetime.now())
+                    y.append(y[-1])
+                self._ax_list[n].step(x, y, where="post")  # 绘制最新的数据
+
+            # 设置
+            y_of_ax = [i.value for i in ax_data]
+            self._ax_list[n].set_yticks(
+                self._cal_y_ticks(max(abs(max(y_of_ax)), abs(min(y_of_ax))), 7)
+            )
+            self._ax_list[n].xaxis.set_major_formatter(mdate.DateFormatter('%H:%M'))
+            self._ax_list[n].tick_params(
+                labelsize=6,
+                labelrotation=15
+            )
+            plt.draw()
+
+    @staticmethod
+    def _cal_y_ticks(_max, n) -> list:
+        if _max == 0:
+            return [-1, 0, 1]
+        if _max > 1:
+            num_n = len(str(_max).split('.')[0])
+            num_n -= 2
+        else:
+            num_n = -1
+            for s in str(_max).split('.')[-1]:
+                if s != 0:
+                    break
                 num_n -= 1
-            _max = round(_max + 10 ** num_n, -num_n)
-            return [round(i, -num_n) for i in np.linspace(-_max, _max, n)]
+            num_n -= 1
+        _max = round(_max + 10 ** num_n, -num_n)
+        return [round(i, -num_n) for i in np.linspace(-_max, _max, n)]
 
-        if len(x) != len(y):
-            ex = ValueError("x and y must have same first dimension")
-            raise ex
 
-        self._ax_list[index].clear()  # 清空子图数据
+class RtdSingleFileDataHandler(RtdDataHandlerBase):
+    """
+    2, 只有唯一一个数据文件, column 集中在一个图
+        RtdAIOFileDataHandler
+        ./AxTitle.csv
+    3, 只有唯一一个数据文件, 按照 column 分图
+        ./Data.csv
+    """
+    def __init__(
+            self,
+            engine: RtdMonitorEngine,
+            file_path,
+            all_in_one_ax_name="",          # 默认为空，表示按照column name分图，不合并在一张图中
+    ):
+        super(RtdSingleFileDataHandler, self).__init__(engine=engine)
+        self._file_path = file_path
+        self._all_in_one_ax_name = all_in_one_ax_name
 
-        x.append(datetime.now())
-        y.append(y[-1])
+    def handling(self):
+        self.engine.logger.info('handling new data')
+        self.refresh_data()
+        self._set_data_unupdated()
+        with open(self._file_path) as f:
+            l_lines = f.readlines()
+        for line in l_lines:
+            line = line.strip()
+            if line == '':
+                continue
+            index_name, column_name, value = line.split(',')
+            value = float(value)
+            new_data = RtdData(
+                index=index_name,
+                column=column_name,
+                value=value,
+            )
+            self._append_new_data(new_data)
+        self._set_data_updated()
 
-        self._ax_list[index].step(x, y, where="post")  # 绘制最新的数据
-        self._ax_list[index].set_yticks(
-            _cal_y_ticks(max(abs(max(y)), abs(min(y))), 7)
+    def _append_new_data(self, data: RtdData):
+        if not self._all_in_one_ax_name:
+            self.engine.data[data.column].append(data)
+        else:
+            self.engine.data[self._all_in_one_ax_name].append(data)
+
+    def _set_data_updated(self):
+        self.engine.is_data_updated = True
+
+    def _set_data_unupdated(self):
+        self.engine.is_data_updated = False
+
+    def refresh_data(self):
+        self.engine.data = defaultdict(list)
+        self.engine.is_data_updated = True
+
+
+class RtdCommonPlotter(RtdPlotterBase):
+    """
+    1，持续接收画图信息，
+    2，实现画图功能，
+    3，画图并展示，   plt.show()
+    1，持续接收画图信息，并在信息变更后立即重新再画。   plt.draw()
+    """
+    def __init__(
+            self,
+            engine,
+            nrows, ncols, title,
+            sort_by_column_name=''
+    ):
+        super(RtdCommonPlotter, self).__init__(engine=engine)
+
+        self._plotting_thread: None or threading.Thread = None
+        self._sort_by_column_name = sort_by_column_name
+
+        # 创建子图
+        self.fig, self.axs = plt.subplots(
+            nrows, ncols,
+            figsize=self._cal_fig_size(nrows, ncols)
         )
-        self._ax_list[index].set_title(symbol, fontsize=8)
-        self._ax_list[index].tick_params(
-            labelsize=6,
-            labelrotation=15
-        )
-        self._ax_list[index].xaxis.set_major_formatter(mdate.DateFormatter('%H:%M'))
+        self.fig.subplots_adjust(
+            left=0.06, right=0.99,
+            bottom=0.06, top=0.95,
+            wspace=0.18, hspace=0.3
+        )  # 设置子图之间的间距
+        self.fig.canvas.set_window_title(title)  # 设置窗口标题
 
-        plt.draw()
+        # 子图字典，key为子图的序号，value为子图句柄
+        self._ax_list: List[Axes] = []
+        if nrows == 1 and ncols == 1:
+            self._ax_list.append(self.axs)
+        elif nrows == 1:
+            for i in range(ncols):
+                self._ax_list.append(self.axs[i])
+        elif ncols == 1:
+            for i in range(nrows):
+                self._ax_list.append(self.axs[i])
+        else:
+            for i in range(nrows):
+                for j in range(ncols):
+                    self._ax_list.append(self.axs[i, j])
 
+    @staticmethod
+    def _cal_fig_size(nrows, ncols):
+        row_size = 3 * nrows
+        col_size = 2 * ncols
+        return row_size, col_size
+
+    def plot(self):
+        """ 显示曲线  外部调用"""
+        plt.show()
+
+    def update(self):
+        self.engine.logger.info('plotting new data')
+        l_ax_names = list(self.engine.data.keys())
+        l_ax_names.sort()
+        for n, ax_name in enumerate(l_ax_names):
+            #
+            self._ax_list[n].clear()  # 清空子图数据
+            self._ax_list[n].set_title(ax_name, fontsize=8)
+
+            # 数据处理
+            df = pd.DataFrame(self.engine.data[ax_name])
+            df = df.pivot_table(values='value', index='index', columns='column', aggfunc='sum')
+            df = df.fillna(0)  # 补零
+            df = df.loc[(df != 0).any(axis=1), :]  # 去除volume 全是0的 ticker
+
+            l_column_names = df.columns.to_list()
+            max_value = max(np.max(df))
+            min_value = min(np.min(df))
+
+            # 按照 Ticker 量排序
+            if self._sort_by_column_name not in l_column_names:
+                l_index_sorted_by_value = list(df.T.sum().sort_values().to_dict().keys())
+            else:
+                l_index_sorted_by_value = df.loc[:, self._sort_by_column_name].sort_values().index.to_list()
+            df = df.reindex(l_index_sorted_by_value)
+
+            # 按column 画线
+            for _column_name in list(df.columns):
+                _l_values = list(df.loc[:, _column_name])
+                # ax.scatter(_l_tickers, _l_value, label=_trader, s=2)
+                self._ax_list[n].plot(l_index_sorted_by_value, _l_values, label=_column_name, linewidth=0.5)
+
+            # 横纵轴 标签
+            # ax.set_xticks(all_tickers)
+            self._ax_list[n].set_xticklabels(l_index_sorted_by_value, rotation=90, fontsize=10)
+            self._ax_list[n].set_ylim((min_value, max_value), )
+            # 图例
+            plt.legend(bbox_to_anchor=(1.05, 1.0), loc='upper left')
+            plt.tight_layout()
+            # 网格
+            plt.grid(True, linestyle='--')
+            plt.draw()

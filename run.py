@@ -51,8 +51,9 @@ class MyScheduler(ScheduleRunner):
         p_1_get_position_bat = os.path.join(PATH_ROOT, '_1.GetTraderPosition.bat')
         p_2_get_initx = os.path.join(PATH_ROOT, '_2.GetTraderInitX.bat')
         p_3_cal = os.path.join(PATH_ROOT, '_3.GenPerInitXPosition.AIO.bat')
+        p_4_cal = os.path.join(PATH_ROOT, '_3.GenPerInitXPosition.Selected.bat')
 
-        l_bat = [p_1_get_position_bat, p_2_get_initx, p_3_cal]
+        l_bat = [p_1_get_position_bat, p_2_get_initx, p_3_cal, p_4_cal]
 
         while self.schedule_in_running:
             for _bat in l_bat:
@@ -64,46 +65,40 @@ class MyScheduler(ScheduleRunner):
 if __name__ == '__main__':
     my_logger = MyLogger('rtd plotter')
 
+    # 运行bat 更新数据 =========================
     bat_scheduler = MyScheduler(
-        running_time=[[time(0, 0, 0), time(23, 59, 59)]],
+        running_time=[
+            [time(9, 0, 0), time(11, 32, 0)],
+            [time(13, 30, 0), time(15, 2, 0)],
+            [time(21, 0, 0), time(23, 2, 0)],
+        ],
         interval=15,
         logger=my_logger
     )
     bat_scheduler.start()
     sleep(1)
 
-    # ===================
+    # AIO 画图 ===================
     engine = RtdMonitorEngine(
-        running_time=[[time(0, 0, 0), time(23, 59, 59)]],
+        running_time=[
+            [time(9, 0, 0), time(11, 32, 0)],
+            [time(13, 30, 0), time(15, 2, 0)],
+            [time(21, 0, 0), time(23, 2, 0)],
+        ],
         rtd_task_interval=5,
         refresh_data_in_task_start=True,
         logger=my_logger
     )
-
-    # ====================
-    # plotter = RtdTimeSeriesPlotter(
-    #     engine,
-    #     2, 1, 'test'
-    # )
-    # handler = RtdTimeSeriesDataHandler(
-    #     engine,
-    #     path_root=r'C:\Users\Jeffery\Desktop\_20221031_tmp\C:\Users\Jeffery\Desktop\_20221031_tmp\time_series',
-    #     all_in_one_ax_name='Cffex'
-    # )
-
-    # ===================
     plotter = RtdCommonPlotter(
         engine,
-        1, 1, 'test',
+        1, 1, 'Position_AIO',
         sort_by_column_name='ShengShi23'
     )
     handler = RtdSingleFileDataHandler(
         engine,
-        file_path=r'D:\_workspace\alphasys\AlphaSysGuardingPlatform\TradingServer\_DailyCheck.4'
-                  r'.AGP.OMS.LivePositionView\_Output_3_PositionPInitX\data.AIO.csv',
+        file_path=os.path.join(PATH_ROOT, r'_Output_3_PositionPInitX\data.AIO.csv'),
         all_in_one_ax_name='AIO'
     )
-
     engine.add_plotter(plotter)
     engine.add_data_handler(handler)
     engine.start()
